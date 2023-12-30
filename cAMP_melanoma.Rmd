@@ -1,0 +1,81 @@
+---
+title: "cAMP signaling and differentiation state in BRAF-mutant melanoma"
+author: "Caitlin Jagla"
+date: "October 2021 Rotation Project"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(ggsci)
+library(viridis)
+library(gginnards)
+library(tidyverse)
+
+knitr::opts_chunk$set(echo = TRUE)
+
+source("scripts/biplot_custom_functions.R") #load custom functions
+
+anno.hub <- AnnotationHub::AnnotationHub()
+  ##search for record: query(anno.hub, c("OrgDb","Homo sapiens"))
+anno.hs <- anno.hub[["AH114084"]]
+  #example - df$symbol <- mapIds(anno.hs, keys=row.names(df),keytype="ENSEMBL", column="SYMBOL")
+
+dataset_name = "integrated_braf"
+```
+
+
+# Introduction
+
+Melanocyte differentiation depends on cAMP: MC1R -> G$\alpha$s -> AC -> cAMP -> PKA -> CREB -> MITF.
+
+# Workflow
+- Data access
+  * Tsoi et al. GREIN database
+  * CCLE gene counts: DepMap portal
+  * both resources provide length-scaled gene counts processed in similar pipelines
+- Data integration
+  * Join gene counts tables
+  * Combat-Seq batch correction: "negative binomial regression model that retains the integer nature of count data in RNA-seq studies, making the batch-adjusted data compatible with common differential expression software packages that require integer counts"
+- Integrated data processing
+  * DESeq2 variance stabilizing transformation: "log-space transformation to decouple per-gene variance from mean expression level (alternative/preferred vs. TPM)"
+  * Gene-wise z-scores across all samples
+- Dimensionality reduction
+  * PCA for gene-wise z-scores across all samples
+- Linear regression
+  * mean z-score for designated genesets: Are mean z-scores for CREB family transcription factor targets correlated to mean z-scores for differentiation state signatures?
+- Expression levels of individual cAMP/CREB pathway components across differentiation states (per-gene ANOVA)
+
+\newpage
+
+## Tidy data & annotations
+1. Tidy length-scaled gene expression counts data from Tsoi et al. (2018) and CCLE (downloaded from GREIN and DepMap, respectively)
+2. Tidy manually generated annotation tables and gene lists (downloaded from Harmonizome, BioPlanet, and GO)
+3. Aggregate annotations into combined tables
+```{r tidy, message=FALSE, eval=FALSE}
+source("scripts/1_tidy_data.R")
+source("scripts/2_tidy_annotations.R")
+source("scripts/3_aggregate_annotations.R")
+```
+
+
+## Integrate gene expression counts data and get z-scores
+1. Batch correct for data source using CombatSeq 
+2. Use DESeq2 Variance Stabilizing Transformation (log-space transformation that decouples per-gene variance from mean expression level; a preferred alternative to TPM)
+3. Calculate gene-wise z-scores on VST values
+4. Calculate mean z-scores for gene lists 
+```{r integrate, message=FALSE, warning=FALSE, results='hide',eval=FALSE}
+source("scripts/4_get_integrated_vst_zscores.R")
+source("scripts/5_get_mean_zscores.R")
+```
+
+## Analysis 
+
+1. Demonstrate batch correction
+```{r batch_corr_plot}
+
+
+
+```
+
+
