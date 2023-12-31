@@ -3,9 +3,9 @@ title: "cAMP signaling and differentiation state in BRAF-mutant melanoma"
 author: "Caitlin Jagla"
 date: "October 2021 Rotation Project"
 output:
+  pdf_document: default
   html_document:
     df_print: paged
-  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -49,7 +49,7 @@ Melanocyte differentiation depends on cAMP: MC1R -> G$\alpha$s -> AC -> cAMP -> 
   * Gene-wise z-scores across all samples
 - Dimensionality reduction
   * PCA for gene-wise z-scores across all samples
-- Linear regression
+- Correlation analysis
   * mean z-score for designated genesets: Are mean z-scores for CREB family transcription factor targets correlated to mean z-scores for differentiation state signatures?
 - Expression levels of individual cAMP/CREB pathway components across differentiation states (per-gene ANOVA)
 
@@ -164,7 +164,8 @@ pca$goi_subsets <- list()
 pca$goi_subsets$tsoi_sigs <- pca(data$goi_subsets$tsoi_sigs, metadata = metadata)
 
 plots$goi_subsets <- list()
-plots$goi_subsets$tsoi_sigs_PC1PC2 <- biplot_diff(pca$goi_subsets$tsoi_sigs, x="PC1", y="PC2") + 
+plots$goi_subsets$tsoi_sigs_PC1PC2 <- biplot_diff(pca$goi_subsets$tsoi_sigs, 
+                                                  x="PC1", y="PC2") + 
   ggtitle("Tsoi Differentiation State Signatures")
 
 plots$goi_subsets$tsoi_sigs_PC1PC2
@@ -185,9 +186,11 @@ for (tf in 1:length(anno$tf_targets)){
   data[["goi_subsets"]][["tf_targets"]][[tf_name]] <- data$vst_corr |> 
   dplyr::filter(row.names(data$vst_corr) %in% gene_list)
   
-  pca[["goi_subsets"]][["tf_targets"]][[tf_name]] <- pca(data[["goi_subsets"]][["tf_targets"]][[tf_name]], metadata = metadata)
+  pca[["goi_subsets"]][["tf_targets"]][[tf_name]] <- pca(
+    data[["goi_subsets"]][["tf_targets"]][[tf_name]], metadata = metadata)
   
-  plots[["goi_subsets"]][["tf_targets"]][[tf_name]] <- biplot_diff(pca[["goi_subsets"]][["tf_targets"]][[tf_name]], x="PC1", y="PC2") + 
+  plots[["goi_subsets"]][["tf_targets"]][[tf_name]] <- biplot_diff(
+    pca[["goi_subsets"]][["tf_targets"]][[tf_name]], x="PC1", y="PC2") + 
   ggtitle(paste0(tf_name, " target genes"))
 }
 
@@ -206,27 +209,31 @@ plots[["goi_subsets"]][["tf_targets"]]
   * negative correlation: PPARGC1A, CREM, CREBBP, CREB1
 ```{r eigencor plot on tsoi signature gene subset, message=FALSE, warning=FALSE}
 
-data$mean_z <- read_csv(file.path("output", dataset_name, "mean_zscores", "all_genesets_z.csv")) |> 
+data$mean_z <- read_csv(file.path("output", dataset_name, "mean_zscores", 
+                                  "all_genesets_z.csv")) |> 
   rename("...1"="sample")
 
-pca$goi_subsets$tsoi_sigs$metadata <- left_join(pca$goi_subsets$tsoi_sigs$metadata, data$mean_z, by="sample")
+pca$goi_subsets$tsoi_sigs$metadata <- left_join(pca$goi_subsets$tsoi_sigs$metadata, 
+                                                data$mean_z, by="sample")
 
 eigen <- list()
 eigen$corr_tftargets <- eigencorplot(pca$goi_subsets$tsoi_sigs, 
-                                    metavars = pca$goi_subsets$tsoi_sigs$metadata |> dplyr::select(contains("target")) |> colnames(),
-                                    components = getComponents(pca$goi_subsets$tsoi_sigs, 1:4),
-                                    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
-                                    cexCorval = 1,
-                                    fontCorval = 1,
-                                    posLab = 'bottomleft',
-                                    rotLabX = 45,
-                                    scale = TRUE,
-                                    main = "Pearson's r correlation between\nTF target mean z-scores & PCs",
-                                    corFUN = 'pearson',
-                                    corUSE = 'pairwise.complete.obs',
-                                    #corMultipleTestCorrection = 'BH',
-                                    signifSymbols = c('*', ''),
-                                    signifCutpoints = c(0, 0.05, 1))
+                        metavars = pca$goi_subsets$tsoi_sigs$metadata |> 
+                          dplyr::select(contains("target")) |> colnames(),
+                        components = getComponents(pca$goi_subsets$tsoi_sigs, 1:4),
+                        col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+                        cexCorval = 1,
+                        fontCorval = 1,
+                        posLab = 'bottomleft',
+                        rotLabX = 45,
+                        scale = TRUE,
+                        main = "Pearson's r correlation between
+                        \nTF target mean z-scores & PCs",
+                        corFUN = 'pearson',
+                        corUSE = 'pairwise.complete.obs',
+                        #corMultipleTestCorrection = 'BH',
+                        signifSymbols = c('*', ''),
+                        signifCutpoints = c(0, 0.05, 1))
 eigen$corr_tftargets
 ```
 
@@ -234,22 +241,23 @@ eigen$corr_tftargets
 ```{r eigencor2, warning=FALSE, fig.height=8, fig.width=6}
 
 eigen$corr_tfs <- eigencorplot(pca$goi_subsets$tsoi_sigs, 
-                                    metavars = pca$goi_subsets$tsoi_sigs$metadata |>
-                                               dplyr::select(!contains(c("targets","diffstate","signature", "GO_", "bp_", "cell_line", "sample", "source"))) |> 
-                                               colnames(),
-                                    components = getComponents(pca$goi_subsets$tsoi_sigs, 1:4),
-                                    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
-                                    cexCorval = 0.75,
-                                    fontCorval = 1,
-                                    posLab = 'bottomleft',
-                                    rotLabX = 45,
-                                    scale = TRUE,
-                                    main = "Pearson's r correlation",
-                                    corFUN = 'pearson',
-                                    corUSE = 'pairwise.complete.obs',
-                                    corMultipleTestCorrection = 'BH',
-                                    signifSymbols = c('*', ''),
-                                    signifCutpoints = c(0, 0.05, 1))
+                    metavars = pca$goi_subsets$tsoi_sigs$metadata |>
+                     dplyr::select(!contains(c("targets","diffstate","signature", 
+                                               "GO_", "bp_", "cell_line", "sample", "source"))) |> 
+                     colnames(),
+                    components = getComponents(pca$goi_subsets$tsoi_sigs, 1:4),
+                    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+                    cexCorval = 0.75,
+                    fontCorval = 1,
+                    posLab = 'bottomleft',
+                    rotLabX = 45,
+                    scale = TRUE,
+                    main = "Pearson's r correlation",
+                    corFUN = 'pearson',
+                    corUSE = 'pairwise.complete.obs',
+                    corMultipleTestCorrection = 'BH',
+                    signifSymbols = c('*', ''),
+                    signifCutpoints = c(0, 0.05, 1))
 eigen$corr_tfs
 
 ```
@@ -267,20 +275,26 @@ lr$data <- pca$goi_subsets$tsoi_sigs$metadata |>
 lr$pearson <- rcorr(as.matrix(lr$data[,3:186]))
 
 
-lr$plot_list <- c("creb_family_tfs", "creb_binding_cofactors", "creb_activity_markers", "ap1_family_tfs", #grouped GOIs
+lr$plot_list <- c("creb_family_tfs", "creb_binding_cofactors", 
+                  "creb_activity_markers", "ap1_family_tfs", #grouped GOIs
                   "AXL", "NGFR", "SOX10", "MITF", #basic melanoma diff state markers
                   "NR4A1", "NR4A2", "NR4A3", # marker of creb activity 
-                  #"ATF1", "ATF4", "CREB1", "CREB3", "CREB5", "CREB3L1", "CREB3L2", "CREB3L3", "CREB3L4", "CREBL2", "CREBZF", "CREM", # creb family tfs
+                  #"ATF1", "ATF4", "CREB1", "CREB3", "CREB5", "CREB3L1", "CREB3L2", 
+                  #"CREB3L3", "CREB3L4", "CREBL2", "CREBZF", "CREM", # creb family tfs
                   #"CRTC2", "CRTC3", "EID1", "EP300", "PPARGC1A", # creb binding cofactors
                   #"FOS", "FOSL1", "FOSL2", "JUN", "JUNB", # ap1 family tfs
-                  "creb1_targets", "crebbp_targets", "crem_targets", "ep300_targets", "fos_targets", "fosl1_targets", "jun_targets", "jund_targets",
-                  "mitf_targets", "nf1_targets", "nr4a2_targets", "ppargc1a_targets" #tf targets mean z scores
+                  #tf targets mean z scores
+                  "creb1_targets", "crebbp_targets", "crem_targets", "ep300_targets", 
+                  "fos_targets", "fosl1_targets", "jun_targets", "jund_targets",
+                  "mitf_targets", "nf1_targets", "nr4a2_targets", "ppargc1a_targets" 
                   )
 
 lr$plot_r <- lr$pearson$r[row.names(lr$pearson$r) %in% lr$plot_list, 1:4]
 lr$plot_r <- lr$plot_r[order(match(rownames(lr$plot_r), lr$plot_list)), ]
 
-lr$plot <- ggcorrplot(lr$plot_r) + ggtitle("Pearson's r for transcription factor targets vs.\ndifferentiation state signatures (mean z-scores)")
+lr$plot <- ggcorrplot(lr$plot_r) + 
+  ggtitle("Pearson's r for transcription factor targets vs.
+           \ndifferentiation state signatures (mean z-scores)")
 
 lr$plot
 ```
