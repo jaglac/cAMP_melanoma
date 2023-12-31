@@ -2,7 +2,10 @@
 title: "cAMP signaling and differentiation state in BRAF-mutant melanoma"
 author: "Caitlin Jagla"
 date: "October 2021 Rotation Project"
-output: pdf_document
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -11,6 +14,10 @@ library(ggsci)
 library(viridis)
 library(gginnards)
 library(tidyverse)
+library(PCAtools)
+library(ggpubr)
+library(Hmisc)
+library(ggcorrplot)
 
 knitr::opts_chunk$set(echo = TRUE)
 
@@ -69,13 +76,213 @@ source("scripts/4_get_integrated_vst_zscores.R")
 source("scripts/5_get_mean_zscores.R")
 ```
 
+```{r import data, echo=FALSE, warning=FALSE, include=FALSE, message=FALSE}
+
+#import processed annotated geneset dataframes
+anno_files_list <- list.files(path="tidy_input/annotations", pattern = "csv")
+tf_files_list <- list.files(path="tidy_input/annotations/individual_tfs")
+aggr_files_list <- list.files(path="tidy_input/annotations/aggregated_tables")
+
+anno <- list()
+anno$tf_targets <- list()
+anno$aggr <- list()
+
+for (i in 1:length(anno_files_list)){
+  name <- sub(".csv", "", anno_files_list[[i]])
+  anno[[name]] <- read.csv(file.path("tidy_input/annotations", anno_files_list[[i]]), row.names = 1, header = TRUE)
+}
+
+for (i in 1:length(tf_files_list)){
+  name <- sub("_targets.csv", "", tf_files_list[[i]])
+  anno$tf_targets[[name]] <- read.csv(file.path("tidy_input/annotations/individual_tfs", tf_files_list[[i]]), row.names = 1, header = TRUE)
+}
+
+for (i in 1:length(aggr_files_list)){
+  name <- sub(".csv", "", aggr_files_list[[i]])
+  anno$aggr[[name]] <- read.csv(file.path("tidy_input/annotations/aggregated_tables", aggr_files_list[[i]]), row.names = 1, header = TRUE)
+}
+
+remove(anno_files_list, tf_files_list, i, name, aggr_files_list)
+
+anno$go_gpcr <- anno$aggr$aggr_without_tf_targets %>% dplyr::filter(!grepl("cell_cycle",go_category))
+anno$go_gpcr_key <- anno$go_key %>% dplyr::filter(!grepl("cell_cycle",go_category))
+anno$go_cellcycle_key <- anno$go_key %>% dplyr::filter(grepl("cell_cycle",go_category))
+
+# import metadata and filter to include only cell lines with assigned differentiation states
+metadata <- read.csv(file.path("tidy_input", dataset_name, "metadata.csv"), row.names = 1, header = TRUE)
+rownames(metadata) <- metadata$cell_line
+metadata <- metadata |>
+  dplyr::mutate(diffstate = case_when(comb_diffstate == "na_nd" ~ tsoi_diffstate,
+                                      tsoi_diffstate == "na_nd" ~ comb_diffstate)) |>
+  dplyr::filter(diffstate %in% c("undifferentiated", "melanocytic", "neural_crest_like", "transitory"))
+
+# import data
+data <- list()
+data$vst_noncorr <- read_csv(file.path("output", dataset_name, "non_batch_corrected", "vst.csv")) |> 
+  column_to_rownames(var="...1") |>
+  dplyr::select(any_of(metadata$sample)) |> 
+  dplyr::rename_at(vars(metadata$sample), ~ metadata$cell_line)
+data$vst_corr <- read_csv(file.path("output", dataset_name, "vst.csv")) |> 
+  column_to_rownames(var="...1") |>
+  dplyr::select(any_of(metadata$sample)) |> 
+  dplyr::rename_at(vars(metadata$sample), ~ metadata$cell_line)
+```
+
+
+
+
 ## Analysis 
 
-1. Demonstrate batch correction
-```{r batch_corr_plot}
+### 1. Is batch correction required?
+Cell lines separate in PC1 vs PC2 space regardless of batch correction, but the clusters are tighter and there is more integration between data sources when batch correction is applied.
+```{r batch_corr_plot, message=FALSE, fig.width=10}
+pca <- list()
+pca$noncorr <- pca(data$vst_noncorr, metadata = metadata, removeVar=0.1)
+pca$corr <- pca(data$vst_corr, metadata = metadata, removeVar=0.1)
+
+plots <- list()
+plots$biplot_noncorr_PC1PC2 <- biplot_diff(pca$noncorr, x="PC1", y="PC2") + 
+  ggtitle("Non-Batch Corrected")
+plots$biplot_corr_PC1PC2 <- biplot_diff(pca$corr, x="PC1", y="PC2") + 
+  ggtitle("Batch Corrected")
+
+ggarrange(plots$biplot_noncorr_PC1PC2, plots$biplot_corr_PC1PC2, 
+          ncol = 2, common.legend=TRUE, legend="bottom")
+
+```
 
 
+### 2. Do cell lines cluster by differentiation state when subsetted to include only differentiation state signatures?
+As expected, subsetting the gene expression matrix to contain only 514 genes present in the Tsoi *et al.*-defined differentiation state signatures leads to distinct clustering based on previously designated differentiation state.
+```{r biplot_diff on GOI subsets, message=FALSE}
 
+data$goi_subsets <- list()
+data$goi_subsets$tsoi_sigs <- data$vst_corr |> 
+  dplyr::filter(row.names(data$vst_corr) %in% anno$tsoi_subtype_signatures$gene_ensembl)
+
+pca$goi_subsets <- list()
+pca$goi_subsets$tsoi_sigs <- pca(data$goi_subsets$tsoi_sigs, metadata = metadata)
+
+plots$goi_subsets <- list()
+plots$goi_subsets$tsoi_sigs_PC1PC2 <- biplot_diff(pca$goi_subsets$tsoi_sigs, x="PC1", y="PC2") + 
+  ggtitle("Tsoi Differentiation State Signatures")
+
+plots$goi_subsets$tsoi_sigs_PC1PC2
+
+```
+
+### 3. Do cell lines cluster by differentiation state when subsetted to include only transcription factor target genes?
+Subsetting the gene expression matrix to contain only genes targeted by transcription factors of interest leads to distinct clustering based on previously designated differentiation state, for the majority of transcription factors tested.
+```{r TF targets biplots, message=FALSE, warning=FALSE, results='hide'}
+data$goi_subsets$tf_targets <- list()
+pca$goi_subsets$tf_targets <- list()
+plots$goi_subsets$tf_targets <- list()
+
+for (tf in 1:length(anno$tf_targets)){
+  gene_list <- anno[["tf_targets"]][[tf]][["gene_ensembl"]]
+  tf_name <- names(anno[["tf_targets"]])[tf]
+  
+  data[["goi_subsets"]][["tf_targets"]][[tf_name]] <- data$vst_corr |> 
+  dplyr::filter(row.names(data$vst_corr) %in% gene_list)
+  
+  pca[["goi_subsets"]][["tf_targets"]][[tf_name]] <- pca(data[["goi_subsets"]][["tf_targets"]][[tf_name]], metadata = metadata)
+  
+  plots[["goi_subsets"]][["tf_targets"]][[tf_name]] <- biplot_diff(pca[["goi_subsets"]][["tf_targets"]][[tf_name]], x="PC1", y="PC2") + 
+  ggtitle(paste0(tf_name, " target genes"))
+}
+
+rm(gene_list, tf_name, tf)
+
+plots[["goi_subsets"]][["tf_targets"]]
+```
+
+
+### 3. Do expression levels of transcription factor targets correlate with principal components that cluster cell lines into previously assigned differentiation states?
+- significantly correlates with PC1, which divides cell lines by differentiation state: 
+  * positive correlation: MITF
+  * negative correlation: NR4A2, NF1, JUND, JUN, FOSL1, FOS, EP300, CREBBP
+- significantly correlates with PC2, which divides cell lines by differentiation state:
+  * positive correlation: NF1, JUND
+  * negative correlation: PPARGC1A, CREM, CREBBP, CREB1
+```{r eigencor plot on tsoi signature gene subset, message=FALSE, warning=FALSE}
+
+data$mean_z <- read_csv(file.path("output", dataset_name, "mean_zscores", "all_genesets_z.csv")) |> 
+  rename("...1"="sample")
+
+pca$goi_subsets$tsoi_sigs$metadata <- left_join(pca$goi_subsets$tsoi_sigs$metadata, data$mean_z, by="sample")
+
+eigen <- list()
+eigen$corr_tftargets <- eigencorplot(pca$goi_subsets$tsoi_sigs, 
+                                    metavars = pca$goi_subsets$tsoi_sigs$metadata |> dplyr::select(contains("target")) |> colnames(),
+                                    components = getComponents(pca$goi_subsets$tsoi_sigs, 1:4),
+                                    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+                                    cexCorval = 1,
+                                    fontCorval = 1,
+                                    posLab = 'bottomleft',
+                                    rotLabX = 45,
+                                    scale = TRUE,
+                                    main = "Pearson's r correlation between\nTF target mean z-scores & PCs",
+                                    corFUN = 'pearson',
+                                    corUSE = 'pairwise.complete.obs',
+                                    #corMultipleTestCorrection = 'BH',
+                                    signifSymbols = c('*', ''),
+                                    signifCutpoints = c(0, 0.05, 1))
+eigen$corr_tftargets
+```
+
+
+```{r eigencor2, warning=FALSE, fig.height=8, fig.width=6}
+
+eigen$corr_tfs <- eigencorplot(pca$goi_subsets$tsoi_sigs, 
+                                    metavars = pca$goi_subsets$tsoi_sigs$metadata |>
+                                               dplyr::select(!contains(c("targets","diffstate","signature", "GO_", "bp_", "cell_line", "sample", "source"))) |> 
+                                               colnames(),
+                                    components = getComponents(pca$goi_subsets$tsoi_sigs, 1:4),
+                                    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+                                    cexCorval = 0.75,
+                                    fontCorval = 1,
+                                    posLab = 'bottomleft',
+                                    rotLabX = 45,
+                                    scale = TRUE,
+                                    main = "Pearson's r correlation",
+                                    corFUN = 'pearson',
+                                    corUSE = 'pairwise.complete.obs',
+                                    corMultipleTestCorrection = 'BH',
+                                    signifSymbols = c('*', ''),
+                                    signifCutpoints = c(0, 0.05, 1))
+eigen$corr_tfs
+
+```
+
+
+### 4. Is mean expression level of transcription factor targets correlated with expression level of differentiation state signatures?
+
+```{r pearson corr, fig.height=4, fig.width=8}
+
+lr <- list()
+lr$data <- pca$goi_subsets$tsoi_sigs$metadata |>
+  dplyr::select(c(2,3,8,9,11,13,15,16:195)) |>
+  column_to_rownames("cell_line")
+
+lr$pearson <- rcorr(as.matrix(lr$data[,3:186]))
+
+
+lr$plot_list <- c("creb_family_tfs", "creb_binding_cofactors", "creb_activity_markers", "ap1_family_tfs", #grouped GOIs
+                  "AXL", "NGFR", "SOX10", "MITF", #basic melanoma diff state markers
+                  "NR4A1", "NR4A2", "NR4A3", # marker of creb activity 
+                  #"ATF1", "ATF4", "CREB1", "CREB3", "CREB5", "CREB3L1", "CREB3L2", "CREB3L3", "CREB3L4", "CREBL2", "CREBZF", "CREM", # creb family tfs
+                  #"CRTC2", "CRTC3", "EID1", "EP300", "PPARGC1A", # creb binding cofactors
+                  #"FOS", "FOSL1", "FOSL2", "JUN", "JUNB", # ap1 family tfs
+                  "creb1_targets", "crebbp_targets", "crem_targets", "ep300_targets", "fos_targets", "fosl1_targets", "jun_targets", "jund_targets",
+                  "mitf_targets", "nf1_targets", "nr4a2_targets", "ppargc1a_targets" #tf targets mean z scores
+                  )
+
+lr$plot_r <- lr$pearson$r[row.names(lr$pearson$r) %in% lr$plot_list, 1:4]
+lr$plot_r <- lr$plot_r[order(match(rownames(lr$plot_r), lr$plot_list)), ]
+
+lr$plot <- ggcorrplot(lr$plot_r) + ggtitle("Pearson's r for transcription factor targets vs.\ndifferentiation state signatures (mean z-scores)")
+
+lr$plot
 ```
 
 

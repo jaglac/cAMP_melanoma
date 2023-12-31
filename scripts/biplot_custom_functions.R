@@ -5,6 +5,44 @@
 #e.g. pca$metadata$MITF <- unlist(vst_df['MITF',2:ncol(vst_df)])
 
 
+# biplot without continuous variable overlay
+
+biplot_diff <- function(pca_object, x, y, colby = "diffstate", shape = "source", ellipse = TRUE){
+  #requires PCAtools, ggplot2, viridis, ggsci, gginnards
+  #use previously created PCAtools pca object
+  plot <- PCAtools::biplot(pca_object,
+                           x = x, 
+                           y = y,
+                           colby = colby,
+                           shape = shape,
+                           ellipse = ellipse,
+                           legendPosition = 'right',
+                           hline = 0, vline = 0, 
+                           lab = NULL, 
+                           gridlines.major = FALSE, 
+                           gridlines.minor = FALSE) 
+  
+  #reorder plot layers so that points are on the top 
+  plot <- gginnards::move_layers(plot, "GeomPolygon", position="bottom")
+  plot <- gginnards::move_layers(plot, match_type = "GeomHline", position = "bottom")
+  plot <- gginnards::move_layers(plot, match_type = "GeomHline", position = "bottom")
+  
+  #adjust plot size to fit ellipses for tsoi et all 53-cell line data
+  #possibly have to change the multiplication factor for other datasets
+  #if stat_ellipse polygons have missing chunks/look funny, most likely caused by axis limits being too small to fit the ellipse shape
+  pb <- ggplot2::ggplot_build(plot)
+  x_max <- max(pb[["data"]][[2]]$x, na.rm=T) * 1.1
+  x_min <- min(pb[["data"]][[2]]$x, na.rm=T) * 1.1
+  y_max <- max(pb[["data"]][[2]]$y, na.rm=T) * 1.25
+  y_min <- min(pb[["data"]][[2]]$y, na.rm=T) * 1.25
+  plot <- plot + ggplot2::ylim(c(y_min, y_max)) + ggplot2::xlim(c(x_min, x_max)) 
+  
+  plot
+}
+
+
+
+
 biplot_gene <- function(pca_object, x, y, gene, ellipse){
   #requires PCAtools, ggplot2, viridis, ggsci, gginnards
   #use previously created PCAtools pca object
